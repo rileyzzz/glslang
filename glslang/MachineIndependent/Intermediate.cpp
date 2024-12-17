@@ -2601,7 +2601,7 @@ void TIntermBranch::updatePrecision(TPrecisionQualifier parentPrecision)
 // This is to be executed after the final root is put on top by the parsing
 // process.
 //
-bool TIntermediate::postProcess(TIntermNode* root, EShLanguage /*language*/)
+bool TIntermediate::postProcess(TIntermNode* root, EShLanguage /*language*/, TSymbolTable& symbolTable)
 {
     if (root == nullptr)
         return true;
@@ -2619,6 +2619,9 @@ bool TIntermediate::postProcess(TIntermNode* root, EShLanguage /*language*/)
         break;
     case EShTexSampTransUpgradeTextureRemoveSampler:
         performTextureUpgradeAndSamplerRemovalTransformation(root);
+        break;
+    case EShTexSampTransSplitCombinedSamplers:
+        performSplitCombinedSamplersTransformation(root, symbolTable);
         break;
     case EShTexSampTransCount:
         assert(0);
@@ -3739,6 +3742,147 @@ struct TextureUpgradeAndSamplerRemovalTransform : public TIntermTraverser {
 void TIntermediate::performTextureUpgradeAndSamplerRemovalTransformation(TIntermNode* root)
 {
     TextureUpgradeAndSamplerRemovalTransform transform;
+    root->traverse(&transform);
+}
+
+struct SplitCombinedSamplersTransform : public TIntermTraverser
+{
+    TIntermediate* intermediate;
+    TSymbolTable* symbolTable;
+    std::unordered_map<long long, TIntermSymbol*> associatedSampler;
+
+    SplitCombinedSamplersTransform(TIntermediate* interm, TSymbolTable* symTab) : intermediate(interm), symbolTable(symTab)
+    {
+    }
+
+    void visitSymbol(TIntermSymbol* symbol) override
+    {
+        if (symbol->getBasicType() == EbtSampler && symbol->getType().getSampler().isCombined()) {
+            if (symbol->getQualifier().isUniform())
+                std::cout << "Found uniform sampler!!\n";
+
+            //symbol->getAsAggregate();
+            //TIntermAggregate* constructor = symbol->getAsAggregate();
+            //if (constructor && constructor->getOp() == EOpConstructTextureSampler) {
+            //    TIntermSequence& seq = constructor->getSequence();
+            //}
+
+            //symbol->getWritableType().getSampler().setCombined(false);
+        }
+    }
+
+    bool isSymbolCombinedTextureUniform(TIntermSymbol* symbol)
+    {
+        if (!symbol->getQualifier().isUniform())
+            return false;
+
+        if (associatedSampler.find(symbol->getId()) != associatedSampler.end())
+            return true;
+
+        return symbol->getBasicType() == EbtSampler && symbol->getType().getSampler().isCombined();
+    }
+
+    TIntermSymbol* getAssociatedSamplerForTexture(TIntermSymbol* texture)
+    {
+        auto found = associatedSampler.find(texture->getId());
+        if (found != associatedSampler.end())
+            return found->second;
+
+        // Create the new pure sampler.
+        TType samplerType = TType(EbtSampler, EvqUniform);
+        samplerType.getSampler().setPureSampler(texture->getType().getSampler().isShadow());
+
+        // Decombine the texture.
+        texture->getWritableType().getSampler().setCombined(false);
+
+        std::string name = std::string(texture->getName()) + "_sam";
+        TString* nameString = NewPoolTString(name.c_str());
+        TVariable* variable = new TVariable(nameString, samplerType);
+        symbolTable->makeInternalVariable(*variable);
+
+        TIntermSymbol* sampler = intermediate->addSymbol(*variable);
+        associatedSampler[texture->getId()] = sampler;
+        return sampler;
+    }
+
+    bool visitAggregate(TVisit, TIntermAggregate* ag) override
+    {
+        if (ag->getOp() == EOpConstructTextureSampler)
+            return true;
+
+        using namespace std;
+        TIntermSequence& seq = ag->getSequence();
+        TQualifierList& qual = ag->getQualifierList();
+
+        
+        // qual and seq are indexed using the same indices, so we have to modify both in lock-step
+        assert(seq.size() == qual.size() || qual.empty());
+
+        size_t write = 0;
+        //for (size_t i = 0; i < seq.size(); ++i) {
+        for (size_t i = 0; i < seq.size(); ++i) {
+            TIntermSymbol* symbol = seq[i]->getAsSymbolNode();
+            if (symbol && isSymbolCombinedTextureUniform(symbol)) {
+                TIntermSymbol* samplerObj = getAssociatedSamplerForTexture(symbol);
+
+                if (ag->getOp() == EOpLinkerObjects)
+                {
+                  // Add the created sampler to the sequence.
+                  seq.insert(seq.begin() + i, samplerObj);
+
+                  // Add qualifier if necessary.
+                  if (!qual.empty())
+                      qual.insert(qual.begin() + i, symbol->getQualifier().storage);
+
+                  // Skip the sampler.
+                  i++;
+                }
+                else
+                {
+                    // replace the symbol with a constructor.
+                    TIntermAggregate* txcombine = new TIntermAggregate(EOpConstructTextureSampler);
+
+                    txcombine->getSequence().push_back(symbol);
+                    txcombine->getSequence().push_back(samplerObj);
+
+                    TSampler samType = symbol->getType().getSampler();
+                    samType.setCombined(true);
+                    txcombine->setType(TType(samType, EvqTemporary));
+                    seq[i] = txcombine;
+                }
+                    
+                std::cout << "Replaced uniform sampler!!\n";
+            }
+
+            /*
+            TIntermNode* result = seq[i];
+
+            // replace constructors with sampler/textures
+            TIntermAggregate* constructor = seq[i]->getAsAggregate();
+            if (constructor && constructor->getOp() == EOpConstructTextureSampler) {
+                if (!constructor->getSequence().empty())
+                    result = constructor->getSequence()[0];
+            }
+
+            // write new node & qualifier
+            seq[write] = result;
+            if (!qual.empty())
+                qual[write] = qual[i];
+            write++;
+            */
+        }
+
+        //seq.resize(write);
+        //if (!qual.empty())
+        //    qual.resize(write);
+
+        return true;
+    }
+};
+
+void TIntermediate::performSplitCombinedSamplersTransformation(TIntermNode* root, TSymbolTable& symbolTable)
+{
+    SplitCombinedSamplersTransform transform(this, &symbolTable);
     root->traverse(&transform);
 }
 

@@ -246,6 +246,7 @@ typedef enum {
 typedef enum {
     EShTexSampTransKeep,   // keep textures and samplers as is (default)
     EShTexSampTransUpgradeTextureRemoveSampler,  // change texture w/o embeded sampler into sampled texture and throw away all samplers
+    EShTexSampTransSplitCombinedSamplers, // Split combined image samplers into separate texture/sampler objects
     LAST_ELEMENT_MARKER(EShTexSampTransCount),
 } EShTextureSamplerTransformMode;
 

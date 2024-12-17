@@ -466,7 +466,7 @@ public:
     void setLimits(const TBuiltInResource& r) { resources = r; }
     const TBuiltInResource& getLimits() const { return resources; }
 
-    bool postProcess(TIntermNode*, EShLanguage);
+    bool postProcess(TIntermNode*, EShLanguage, TSymbolTable&);
     void removeTree();
 
     void setEntryPointName(const char* ep)
@@ -1151,6 +1151,7 @@ protected:
     void pushSelector(TIntermSequence&, const TMatrixSelector&, const TSourceLoc&);
     bool specConstantPropagates(const TIntermTyped&, const TIntermTyped&);
     void performTextureUpgradeAndSamplerRemovalTransformation(TIntermNode* root);
+    void performSplitCombinedSamplersTransformation(TIntermNode* root, TSymbolTable& symbolTable);
     bool isConversionAllowed(TOperator op, TIntermTyped* node) const;
     std::tuple<TBasicType, TBasicType> getConversionDestinationType(TBasicType type0, TBasicType type1, TOperator op) const;
 

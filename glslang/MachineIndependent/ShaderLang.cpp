@@ -1225,7 +1225,7 @@ struct DoPreprocessing {
 struct DoFullParse{
   bool operator()(TParseContextBase& parseContext, TPpContext& ppContext,
                   TInputScanner& fullInput, bool versionWillBeError,
-                  TSymbolTable&, TIntermediate& intermediate,
+                  TSymbolTable& symbolTable, TIntermediate& intermediate,
                   EShOptimizationLevel optLevel, EShMessages messages)
     {
         bool success = true;
@@ -1237,7 +1237,7 @@ struct DoFullParse{
             if (optLevel == EShOptNoGeneration)
                 parseContext.infoSink.info.message(EPrefixNone, "No errors.  No code generation or linking was requested.");
             else
-                success = intermediate.postProcess(intermediate.getTreeRoot(), parseContext.getLanguage());
+                success = intermediate.postProcess(intermediate.getTreeRoot(), parseContext.getLanguage(), symbolTable);
         } else if (! success) {
             parseContext.infoSink.info.prefix(EPrefixError);
             parseContext.infoSink.info << parseContext.getNumErrors() << " compilation errors.  No code generated.\n\n";
