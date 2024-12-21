@@ -251,6 +251,15 @@ typedef enum {
 } EShTextureSamplerTransformMode;
 
 //
+// Texture and Sampler transformation mode.
+//
+typedef enum {
+    EShDepthOutputNormal,                        // Normal depth output
+    EShDepthOutputConvertGLToVulkan,             // Convert GL [-1,1] depth to Vulkan [0, 1] on writes to gl_Position and gl_fragDepth
+    LAST_ELEMENT_MARKER(EShDepthOutputCount),
+} EShDepthOutputMode;
+
+//
 // Message choices for what errors and warnings are given.
 //
 enum EShMessages : unsigned {
@@ -505,6 +514,7 @@ public:
     GLSLANG_EXPORT void setNoStorageFormat(bool useUnknownFormat);
     GLSLANG_EXPORT void setNanMinMaxClamp(bool nanMinMaxClamp);
     GLSLANG_EXPORT void setTextureSamplerTransformMode(EShTextureSamplerTransformMode mode);
+    GLSLANG_EXPORT void setDepthOutputMode(EShDepthOutputMode mode);
     GLSLANG_EXPORT void addBlockStorageOverride(const char* nameStr, glslang::TBlockStorageClass backing);
 
     GLSLANG_EXPORT void setGlobalUniformBlockName(const char* name);

@@ -2628,6 +2628,17 @@ bool TIntermediate::postProcess(TIntermNode* root, EShLanguage /*language*/, TSy
         break;
     }
 
+    switch (depthOutputMode) {
+    case EShDepthOutputNormal:
+        break;
+    case EShDepthOutputConvertGLToVulkan:
+        performRemapGLDepthToVulkan(root, symbolTable);
+        break;
+    case EShDepthOutputCount:
+        assert(0);
+        break;
+    }
+    
     return true;
 }
 
@@ -3883,6 +3894,123 @@ struct SplitCombinedSamplersTransform : public TIntermTraverser
 void TIntermediate::performSplitCombinedSamplersTransformation(TIntermNode* root, TSymbolTable& symbolTable)
 {
     SplitCombinedSamplersTransform transform(this, &symbolTable);
+    root->traverse(&transform);
+}
+
+struct RemapGLDepthToVulkanTransform : public TIntermTraverser
+{
+    TIntermediate* intermediate;
+    TSymbolTable* symbolTable;
+
+    RemapGLDepthToVulkanTransform(TIntermediate* interm, TSymbolTable* symTab) : intermediate(interm), symbolTable(symTab)
+    {
+    }
+
+    bool isShaderEntryPoint(const glslang::TIntermAggregate* node)
+    {
+        return node->getName().compare(intermediate->getEntryPointMangledName().c_str()) == 0;
+    }
+
+    TIntermAggregate* makeDepthRemap(const TSourceLoc& loc)
+    {
+        TIntermAggregate* assignList = nullptr;
+
+
+        TVariable* posVar = nullptr;
+
+        TSymbol* glPosition = symbolTable->find("gl_Position");
+        const TAnonMember* anon = glPosition->getAsAnonMember();
+
+        const TVariable* containerVar = anon->getAnonContainer().getAsVariable();
+        TIntermTyped* container = intermediate->addSymbol(*containerVar, loc);
+        TIntermTyped* constNode = intermediate->addConstantUnion(anon->getMemberNumber(), loc);
+        TIntermTyped* node = intermediate->addIndex(EOpIndexDirectStruct, container, constNode, loc);
+        node->setType(*(*containerVar->getType().getStruct())[anon->getMemberNumber()].type);
+
+        // If this is a complex rvalue, we don't want to dereference it many times.  Create a temporary.
+        // TVariable* posVar = new TVariable(NewPoolTString("gl_Position"), TType(EbtFloat, EvqPosition, 4));
+        // symbolTable->makeInternalVariable(*posVar);
+        //rhsTempVar->getWritableType().getQualifier().makeTemporary();
+
+        //TIntermTyped* tempSymL = intermediate->addSymbol(*posVar, loc);
+        //TIntermTyped* tempSymR = intermediate->addSymbol(*posVar, loc);
+        TIntermTyped* z_index = intermediate->addConstantUnion(2, loc);
+        TIntermTyped* w_index = intermediate->addConstantUnion(3, loc);
+
+        TIntermTyped* lhsElement = intermediate->addIndex(EOpIndexDirect, node, z_index, loc);
+
+        TIntermTyped* z_Element = intermediate->addIndex(EOpIndexDirect, node, z_index, loc);
+        TIntermTyped* w_Element = intermediate->addIndex(EOpIndexDirect, node, w_index, loc);
+
+        const TType derefType(TType(EbtFloat), 0);
+
+        lhsElement->setType(derefType);
+        z_Element->setType(derefType);
+        w_Element->setType(derefType);
+
+        // z/w -> [-1, 1]
+
+        // z = ((z / w) * 0.5 + 0.5) * w
+        // z = (z / w) * 0.5w + 0.5w
+        // z = 0.5z + 0.5w
+        auto half = intermediate->addConstantUnion(0.5, EbtFloat, loc);
+        auto half_z = intermediate->addBinaryMath(EOpMul, half, z_Element, loc);
+        auto half_w = intermediate->addBinaryMath(EOpMul, half, w_Element, loc);
+
+        auto remapped_z = intermediate->addBinaryMath(EOpAdd, half_z, half_w, loc);
+
+        // assign->setRight(remapped);
+        assignList = intermediate->growAggregate(assignList, intermediate->addAssign(EOpAssign, lhsElement, remapped_z, loc), loc);
+
+        assert(assignList != nullptr);
+        assignList->setOperator(EOpSequence);
+
+        return assignList;
+    }
+
+    void addDepthRemap(TIntermAggregate* ag)
+    {
+        //TIntermAggregate* assignList = nullptr;
+
+        TIntermSequence& seq = ag->getSequence();
+        TQualifierList& qual = ag->getQualifierList();
+
+        //for (int i = 0; i < seq.size(); i++) {
+        //    TIntermNode* node = seq[i];
+
+        //    TIntermBranch* branch = node->getAsBranchNode();
+        //    if (branch && branch->getFlowOp() == EOpReturn)
+        //    {
+        //        i++;
+        //    }
+        //}
+
+        // TODO: this doesn't handle early returns!
+        TIntermAggregate* remap = makeDepthRemap(TSourceLoc());
+        seq.insert(seq.end(), remap);
+        if (!qual.empty())
+            qual.insert(qual.end(), remap->getQualifier().storage);
+    }
+
+    bool visitAggregate(TVisit, TIntermAggregate* ag) override
+    {
+        if (intermediate->getStage() == EShLangVertex) {
+            if (isShaderEntryPoint(ag)) {
+                std::cout << "entrypoint found!\n";
+
+                TIntermSequence& seq = ag->getSequence();
+                TIntermNode* last = seq.back();
+                addDepthRemap(last->getAsAggregate());
+            }
+        }
+
+        return true;
+    }
+};
+
+void TIntermediate::performRemapGLDepthToVulkan(TIntermNode* root, TSymbolTable& symbolTable)
+{
+    RemapGLDepthToVulkanTransform transform(this, &symbolTable);
     root->traverse(&transform);
 }
 

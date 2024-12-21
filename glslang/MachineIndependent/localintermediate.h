@@ -350,6 +350,7 @@ public:
         hlslIoMapping(false),
         useVariablePointers(false),
         textureSamplerTransformMode(EShTexSampTransKeep),
+        depthOutputMode(EShDepthOutputNormal),
         needToLegalize(false),
         binaryDoubleOutput(false),
         subgroupUniformControlFlow(false),
@@ -816,6 +817,7 @@ public:
 #endif
 
     void setTextureSamplerTransformMode(EShTextureSamplerTransformMode mode) { textureSamplerTransformMode = mode; }
+    void setDepthOutputMode(EShDepthOutputMode mode) { depthOutputMode = mode; }
     int getNumPushConstants() const { return numPushConstants; }
     void addShaderRecordCount() { ++numShaderRecordBlocks; }
     void addTaskNVCount() { ++numTaskNVBlocks; }
@@ -1152,6 +1154,7 @@ protected:
     bool specConstantPropagates(const TIntermTyped&, const TIntermTyped&);
     void performTextureUpgradeAndSamplerRemovalTransformation(TIntermNode* root);
     void performSplitCombinedSamplersTransformation(TIntermNode* root, TSymbolTable& symbolTable);
+    void performRemapGLDepthToVulkan(TIntermNode* root, TSymbolTable& symbolTable);
     bool isConversionAllowed(TOperator op, TIntermTyped* node) const;
     std::tuple<TBasicType, TBasicType> getConversionDestinationType(TBasicType type0, TBasicType type1, TOperator op) const;
 
@@ -1250,6 +1253,7 @@ protected:
     std::set<TString> semanticNameSet;
 
     EShTextureSamplerTransformMode textureSamplerTransformMode;
+    EShDepthOutputMode depthOutputMode;
 
     bool needToLegalize;
     bool binaryDoubleOutput;
